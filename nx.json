@@ -17,6 +17,7 @@
   },
   "projects": {
     "dashboard": { "tags": [] },
-    "dashboard-e2e": { "tags": [], "implicitDependencies": ["dashboard"] }
+    "dashboard-e2e": { "tags": [], "implicitDependencies": ["dashboard"] },
+    "admin": { "tags": [] }
   }
 }

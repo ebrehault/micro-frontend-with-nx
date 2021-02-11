@@ -1,105 +1,158 @@
+# Angular micro-frontends with Nx
 
+Having gigantic monolithic single-page apps is definitely not nice. It might not impact our users because we can split the app in reasonably small bundles we lazy-load. But it does impact badly the developer experience (as people working on the app will have to build and run the full app even though they work on a small part of it), and it is totally not scalable, it restricts the ability to efficiently delegate responsibility of a given feature to a given team.
 
-# Micronx
+A good way to mitigate this problem is to use micro-frontends: instead of building a unique app, we build a collection of apps (called micro-frontends), they are developed independently, but they can be dynamically plugged into the main app.
 
-This project was generated using [Nx](https://nx.dev).
+To achieve that, we need to be able to reference an external component within our main app code, it should be ignored at build time, but at runtime, it will trigger the loading and execution of the corresponding micro-frontend bundle.
 
-<p align="center"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="450"></p>
+That is what provides [Webpack 5 module federation](https://webpack.js.org/concepts/module-federation/).
 
-🔎 **Nx is a set of Extensible Dev Tools for Monorepos.**
+And since Angular 11, we can use Webpack 5! (note: support is still flagged as experimental though).
 
-## Quick Start & Documentation
+We will detail here the steps to enable it and implement micro-frontend in an [Nx](https://nx.dev/)-based project.
 
-[Nx Documentation](https://nx.dev/angular)
+## Initial setup
 
-[10-minute video showing all Nx features](https://nx.dev/angular/getting-started/what-is-nx)
+Let's create an Nx project:
 
-[Interactive Tutorial](https://nx.dev/angular/tutorial/01-create-application)
+```
+npx create-nx-workspace@latest micronx
+```
 
-## Adding capabilities to your workspace
+We will generate 2 apps in this project:
 
-Nx supports many plugins which add capabilities for developing different types of applications and different tools.
+- `dashboard`: it will be our main app
+- `admin`: that is our micro-frontend app we will build separately and call from `dashboard`
 
-These capabilities include generating applications, libraries, etc as well as the devtools to test, and build projects as well.
+In `admin`, we just create an `AdminPanelModule` module with a component and allowing to route to this component:
 
-Below are our core plugins:
+```ts
+const routes: Routes = [
+  {
+    path: '',
+    component: AdminPanelComponent,
+  },
+];
 
-- [Angular](https://angular.io)
-  - `ng add @nrwl/angular`
-- [React](https://reactjs.org)
-  - `ng add @nrwl/react`
-- Web (no framework frontends)
-  - `ng add @nrwl/web`
-- [Nest](https://nestjs.com)
-  - `ng add @nrwl/nest`
-- [Express](https://expressjs.com)
-  - `ng add @nrwl/express`
-- [Node](https://nodejs.org)
-  - `ng add @nrwl/node`
+@NgModule({
+  declarations: [AdminPanelComponent],
+  imports: [CommonModule, RouterModule.forChild(routes)],
+  exports: [RouterModule],
+})
+export class AdminPanelModule {}
+```
 
-There are also many [community plugins](https://nx.dev/nx-community) you could add.
+## Enable module federation
 
-## Generate an application
+First we need to configure our 2 apps for module federation. We will use `@angular-architects/module-federation`:
 
-Run `ng g @nrwl/angular:app my-app` to generate an application.
+```
+ng add @angular-architects/module-federation --project dashboard --port 4200
+ng add @angular-architects/module-federation --project admin --port 4201
+```
 
-> You can use any of the plugins above to generate applications as well.
+It will add the webpack configuration files to each apps and specify on which ports we want to serve them on dev mode.
 
-When using Nx, you can create multiple applications and libraries in the same workspace.
+Then, we need to switch to Webpack 5. We do so by adding the following in our `package.json`:
 
-## Generate a library
+```json
+"resolutions": {
+    "webpack": "5.0.0"
+}
+```
 
-Run `ng g @nrwl/angular:lib my-lib` to generate a library.
+And then run:
 
-> You can also use any of the plugins above to generate libraries as well.
+```
+yarn
+```
 
-Libraries are shareable across libraries and applications. They can be imported from `@micronx/mylib`.
+Important note: `resolutions` is not supported by `npm` for now, so we have to use `yarn`. Be careful, some Nx commands might trigger an `npm` command, and that would pollute our webpack 5 dependencies (it is does happen, just run `yarn` again).
 
-## Development server
+## Configure webpack
 
-Run `ng serve my-app` for a dev server. Navigate to http://localhost:4200/. The app will automatically reload if you change any of the source files.
+In `admin` (our micro-frontend app), we modify the generated `apps/admin/webpack.config.js` files so we expose the `AdminPanelModule` module, and we name it `admin`:
 
-## Code scaffolding
+```ts
+    new ModuleFederationPlugin({
+      name: 'admin',
+      filename: 'remoteEntry.js',
+      exposes: {
+        './Module': './apps/admin/src/app/admin-panel/admin-panel.module.ts',
+      },
+      shared: {
+        '@angular/core': { singleton: true, strictVersion: true },
+        '@angular/common': { singleton: true, strictVersion: true },
+        '@angular/router': { singleton: true, strictVersion: true },
 
-Run `ng g component my-component --project=my-app` to generate a new component.
+        ...sharedMappings.getDescriptors(),
+      },
+    }),
+```
 
-## Build
+In `dashboard` (our main app), we declare `admin` in our possible remotes micro-frontends:
 
-Run `ng build my-app` to build the project. The build artifacts will be stored in the `dist/` directory. Use the `--prod` flag for a production build.
+```ts
+      remotes: {
+        admin: 'admin@http://localhost:4201/remoteEntry.js',
+      },
+```
 
-## Running unit tests
+## Calling the micro-frontend app from the main app
 
-Run `ng test my-app` to execute the unit tests via [Jest](https://jestjs.io).
+We are now allowed to declare a route in our main app that will target our remote micro-frontend. Let's add the following in `apps/dashboard/src/app/app.module.ts`:
 
-Run `nx affected:test` to execute the unit tests affected by a change.
+```ts
+const routes: Route[] = [
+  {
+    path: 'admin-panel',
+    loadChildren: () =>
+      loadRemoteModule({
+        remoteEntry: 'http://localhost:4201/remoteEntry.js',
+        remoteName: 'admin',
+        exposedModule: './Module',
+      }).then((m) => m.AdminPanelModule),
+  },
+];
+```
 
-## Running end-to-end tests
+And let's use the route in `apps/dashboard/src/app/app.component.html`:
 
-Run `ng e2e my-app` to execute the end-to-end tests via [Cypress](https://www.cypress.io).
+```html
+<h1>Dashboard</h1>
+<div>
+  <a routerLink="/admin-panel">Go to admin</a>
+</div>
+<router-outlet></router-outlet>
+```
 
-Run `nx affected:e2e` to execute the end-to-end tests affected by a change.
+## Running the 2 apps
 
-## Understand your workspace
+In a terminal we launch:
 
-Run `nx dep-graph` to see a diagram of the dependencies of your projects.
+```
+nx serve dashboard
+```
 
-## Further help
+And in another one we launch:
 
-Visit the [Nx Documentation](https://nx.dev/angular) to learn more.
+```
+nx serve admin
+```
 
+When going to our main app on `http://localhost:4200`, if we click on the `Go to admin` link, we do see our AdminPanelComponent properly rendered and if we check our Network tab in our debugger we do see it comes from the 4201 port.
 
+## Running in production
 
+We can build `admin`:
 
+```
+nx build admin --prod
+```
 
+And then deploy it somewhere (let's say `https://my-prod-server.net/admin/`).
+We just have to fix the 2 places where we mentioned `http://localhost:4201` to replace it with `https://my-prod-server.net/admin/`:
 
-## ☁ Nx Cloud
-
-### Computation Memoization in the Cloud
-
-<p align="center"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-cloud-card.png"></p>
-
-Nx Cloud pairs with Nx in order to enable you to build and test code more rapidly, by up to 10 times. Even teams that are new to Nx can connect to Nx Cloud and start saving time instantly.
-
-Teams using Nx gain the advantage of building full-stack applications with their preferred framework alongside Nx’s advanced code generation and project dependency graph, plus a unified experience for both frontend and backend developers.
-
-Visit [Nx Cloud](https://nx.app/) to learn more.
+- the one in `apps/dashboard/webpack.config.js` might be fixed in `apps/dashboard/webpack.prod.config.js`
+- the one in `apps/dashboard/src/app/app.module.ts` can managed from our `apps/dashboard/src/environments`: we will use `https://my-prod-server.net/admin/` in `environment.prod.ts`, but maybe also in a secondary one, `environment.remote.ts`, so we could run the main app locally in dev mode while using the remote micro-frontend from production).
