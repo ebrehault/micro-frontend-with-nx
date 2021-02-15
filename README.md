@@ -1,31 +1,35 @@
 # Angular micro-frontends with Nx
 
-Having gigantic monolithic single-page apps is definitely not nice. It might not impact our users because we can split the app in reasonably small bundles we lazy-load. But it does impact badly the developer experience (as people working on the app will have to build and run the full app even though they work on a small part of it), and it is totally not scalable, it restricts the ability to efficiently delegate responsibility of a given feature to a given team.
+Implement micro frontends in Angular using Nx
 
-A good way to mitigate this problem is to use micro-frontends: instead of building a unique app, we build a collection of apps (called micro-frontends), they are developed independently, but they can be dynamically plugged into the main app.
+Monolithic single-page apps may go unnoticed by users, especially if the app is split in reasonably small bundles that are lazy loaded. However, they remain a tough one for developers to maintain. Imagine how they feel when they need to build and run the full app even if they’re only working on a small part of it. On top of that, not being able to delegate the responsibility of a given feature to a specific team makes the monolithic approach not very scalable for project managers.
 
-To achieve that, we need to be able to reference an external component within our main app code, it should be ignored at build time, but at runtime, it will trigger the loading and execution of the corresponding micro-frontend bundle.
+Good news is that micro frontends are here to save your life by mitigating the maintenance and developer experience issues. Instead of building a unique app, you can build a collection of small apps - micro frontends - that are developed independently but can be dynamically plugged into the main app.
 
-That is what provides [Webpack 5 module federation](https://webpack.js.org/concepts/module-federation/).
+What you need to implement micro frontends
 
-And since Angular 11, we can use Webpack 5! (note: support is still flagged as experimental though).
+To set up micro frontends, the code of your main app must be able to reference an external component. This component should be ignored at build time but it should trigger the loading and running of the corresponding micro frontend bundle.
 
-We will detail here the steps to enable it and implement micro-frontend in an [Nx](https://nx.dev/)-based project.
+You can achieve that thanks to [webpack 5's module federation](https://webpack.js.org/concepts/module-federation/), which is available as an experimental feature since Angular 11.
 
-## Initial setup
+Without further ado, let’s look at how you can enable webpack 5 and implement micro frontends in an [Nx](https://nx.dev/)-based project.
 
-Let's create an Nx project:
+## Setup your project
+
+First, create an Nx project:‌
 
 ```
 npx create-nx-workspace@latest micronx
 ```
 
-We will generate 2 apps in this project:
+‌Then generate two apps in the project you just created. For example, `dashboard` can be your main app and `admin` the micro frontend app that will be plugged into the main app.
 
-- `dashboard`: it will be our main app
-- `admin`: that is our micro-frontend app we will build separately and call from `dashboard`
+```
+ng generate @nrwl/angular:application --name=dashboard
+ng generate @nrwl/angular:application --name=admin
+```
 
-In `admin`, we just create an `AdminPanelModule` module with a component and allowing to route to this component:
+Finally, in `admin` , create a module with a component and allow routing for it. The component in the example is `called AdminPanelModule`.
 
 ```ts
 const routes: Routes = [
@@ -40,39 +44,37 @@ const routes: Routes = [
   imports: [CommonModule, RouterModule.forChild(routes)],
   exports: [RouterModule],
 })
-export class AdminPanelModule {}
+export class AdminPanelModule {}‌
 ```
 
 ## Enable module federation
 
-First we need to configure our 2 apps for module federation. We will use `@angular-architects/module-federation`:
+To enable module federation for your 2 apps you can use `@angular-architects/module-federation`.
+
+Add the webpack configuration files to each app and specify the ports where they are served in developer mode.
 
 ```
 ng add @angular-architects/module-federation --project dashboard --port 4200
 ng add @angular-architects/module-federation --project admin --port 4201
 ```
 
-It will add the webpack configuration files to each apps and specify on which ports we want to serve them on dev mode.
-
-Then, we need to switch to Webpack 5. We do so by adding the following in our `package.json`:
+Then, switch to webpack 5. Do so by adding this line to your `package.json`:‌
 
 ```json
-"resolutions": {
-    "webpack": "5.0.0"
-}
+"resolutions": { "webpack": "5.0.0"}
 ```
 
-And then run:
+Now, run the app using `yarn`.
 
 ```
 yarn
 ```
 
-Important note: `resolutions` is not supported by `npm` for now, so we have to use `yarn`. Be careful, some Nx commands might trigger an `npm` command, and that would pollute our webpack 5 dependencies (it is does happen, just run `yarn` again).
+Keep in mind that `npm` doesn't support `resolutions`. This is why you should use `yarn`. Additionally, some Nx commands might trigger an npm command and that could break the webpack 5 dependencies. If that happens, run `yarn` again.
 
 ## Configure webpack
 
-In `admin` (our micro-frontend app), we modify the generated `apps/admin/webpack.config.js` files so we expose the `AdminPanelModule` module, and we name it `admin`:
+In `admin` (your micro frontend app), modify `apps/admin/webpack.config.js` to expose `AdminPanelModule` as a remote module named `admin`.
 
 ```ts
     new ModuleFederationPlugin({
@@ -91,7 +93,7 @@ In `admin` (our micro-frontend app), we modify the generated `apps/admin/webpack
     }),
 ```
 
-In `dashboard` (our main app), we declare `admin` in our possible remotes micro-frontends:
+In `dashboard` (your main app), declare `admin` as a micro frontend using remotes.
 
 ```ts
       remotes: {
@@ -99,9 +101,11 @@ In `dashboard` (our main app), we declare `admin` in our possible remotes micro-
       },
 ```
 
-## Calling the micro-frontend app from the main app
+## Plug the micro frontend app into the main app
 
-We are now allowed to declare a route in our main app that will target our remote micro-frontend. Let's add the following in `apps/dashboard/src/app/app.module.ts`:
+Now you can declare a route in your main app that targets the remote micro frontend.
+
+Add this code to `apps/dashboard/src/app/app.module.ts`:‌
 
 ```ts
 const routes: Route[] = [
@@ -117,7 +121,7 @@ const routes: Route[] = [
 ];
 ```
 
-And let's use the route in `apps/dashboard/src/app/app.component.html`:
+Now, you can plug the route where you need. For example, in the component’s HTML file such as `apps/dashboard/src/app/app.component.html`.‌
 
 ```html
 <h1>Dashboard</h1>
@@ -127,32 +131,39 @@ And let's use the route in `apps/dashboard/src/app/app.component.html`:
 <router-outlet></router-outlet>
 ```
 
-## Running the 2 apps
+## Run the apps
 
-In a terminal we launch:
+When you’re done configuring, run the two apps. You can do that by running these commands in two terminal instances.
 
 ```
 nx serve dashboard
-```
-
-And in another one we launch:
-
-```
 nx serve admin
 ```
 
-When going to our main app on `http://localhost:4200`, if we click on the `Go to admin` link, we do see our AdminPanelComponent properly rendered and if we check our Network tab in our debugger we do see it comes from the 4201 port.
+Now, check that everything works.
+
+Open the main app by going to your local server’s address. For example, `http://localhost:4200`.
+
+When you click on the Go to admin, the micro-frontend app `AdminPanelComponent` should be properly render. Also, if you check the Network tab of your browser’s debugging tools, it should come from the port where the app is being served, such as 4201.
 
 ## Running in production
 
-We can build `admin`:
+Now it’s time to run your micro-frontend in a production environment.
+
+Build the admin app.
 
 ```
 nx build admin --prod
 ```
 
-And then deploy it somewhere (let's say `https://my-prod-server.net/admin/`).
-We just have to fix the 2 places where we mentioned `http://localhost:4201` to replace it with `https://my-prod-server.net/admin/`:
+Update the URLs of your local server in the code with the URL of your production server, then deploy the app there. In the examples, this means replacing `http://localhost:4201` with your production URL. For example, `https://my-prod-server.net/admin/`.
 
-- the one in `apps/dashboard/webpack.config.js` might be fixed in `apps/dashboard/webpack.prod.config.js`
-- the one in `apps/dashboard/src/app/app.module.ts` can managed from our `apps/dashboard/src/environments`: we will use `https://my-prod-server.net/admin/` in `environment.prod.ts`, but maybe also in a secondary one, `environment.remote.ts`, so we could run the main app locally in dev mode while using the remote micro-frontend from production).
+One way is to create specific configuration files for production that will override the basic configuration when running in production mode. For example:
+
+- Create a file called `apps/dashboard/webpack.prod.config.js` that will override the configuration `in apps/dashboard/webpack.config.js`
+- In your `apps/dashboard/src/environments` folder, create a file called `environment.prod.ts` that will override the configuration in `apps/dashboard/src/app/app.module.ts`
+- You can also create a secondary configuration file called `environment.remote.ts` that will allow you to run the main app locally in dev mode while using the remote micro frontend from production
+
+These instructions should give you enough to get started, but if you want more information, you can check out the full code here.
+
+Read the corresponding ["Implement micro frontends in Angular using Nx" blog article](https://onna.dev/implement-micro-frontends-in-angular-using-nx/)
